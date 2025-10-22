@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pixel Art Game</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            background: #1a1a2e;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            font-family: 'Courier New', monospace;
+            color: #fff;
+        }
+        
+        #gameContainer {
+            text-align: center;
+        }
+        
+        canvas {
+            border: 4px solid #0f3460;
+            background: #87ceeb;
+            display: block;
+            margin: 20px auto;
+            image-rendering: pixelated;
+            image-rendering: crisp-edges;
+        }
+        
+        #controls {
+            background: #16213e;
+            padding: 20px;
+            border-radius: 10px;
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        
+        .control-row {
+            display: flex;
+            justify-content: space-around;
+            margin: 10px 0;
+            flex-wrap: wrap;
+        }
+        
+        .key {
+            background: #0f3460;
+            padding: 10px 20px;
+            border-radius: 5px;
+            margin: 5px;
+            border: 2px solid #e94560;
+        }
+        
+        h1 {
+            color: #e94560;
+            margin-bottom: 10px;
+        }
+        
+        #score {
+            font-size: 24px;
+            color: #00ff00;
+            margin: 10px 0;
+        }
+
+        #instructions {
+            background: #0f3460;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 20px auto;
+            max-width: 600px;
+            text-align: left;
+        }
+
+        #instructions h3 {
+            color: #e94560;
+            margin-bottom: 10px;
+        }
+
+        #instructions p {
+            margin: 5px 0;
+            color: #b8b8b8;
+        }
+    </style>
+</head>
+<body>
+    <div id="gameContainer">
+        <h1>🎮 PIXEL ART GAME 2D</h1>
+        <div id="score">Score: 0</div>
+        <canvas id="gameCanvas" width="800" height="600"></canvas>
+        
+        <div id="controls">
+            <h3>⌨️ CONTROLES</h3>
+            <div class="control-row">
+                <span class="key">← A / ←</span>
+                <span class="key">→ D / →</span>
+                <span class="key">↑ W / ↑ SALTAR</span>
+                <span class="key">SPACE DISPARAR</span>
+            </div>
+        </div>
+
+        <div id="instructions">
+            <h3>📝 Configuración de Imágenes</h3>
+            <p><strong>Este juego necesita tus sprites en GitHub.</strong></p>
+            <p>Sube tus imágenes a GitHub y actualiza las rutas en el código (línea ~50-60)</p>
+            <p><strong>Formato esperado:</strong></p>
+            <p>• <code>player_idle.png</code> - Sprite sheet horizontal del personaje en reposo</p>
+            <p>• <code>player_run.png</code> - Sprite sheet horizontal corriendo</p>
+            <p>• <code>player_jump.png</code> - Sprite sheet horizontal saltando</p>
+            <p>• <code>player_shoot.png</code> - Sprite sheet horizontal disparando</p>
+            <p>• <code>bullet.png</code> - Imagen de la bala</p>
+            <p>• <code>tileset.png</code> - Tiles del suelo</p>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        // Configuración del juego
+        const GRAVITY = 0.6;
+        const JUMP_FORCE = -12;
+        const MOVE_SPEED = 5;
+        const GROUND_Y = canvas.height - 100;
+        
+        // URLs de GitHub - ACTUALIZA ESTAS RUTAS CON TUS IMÁGENES
+        const GITHUB_BASE = 'https://raw.githubusercontent.com/kabertpro/bichito_aventure/main/assets/sprites/';
+        
+        const imageUrls = {
+            idle: GITHUB_BASE + 'player_idle.png',
+            run: GITHUB_BASE + 'player_run.png',
+            jump: GITHUB_BASE + 'player_jump.png',
+            shoot: GITHUB_BASE + 'player_shoot.png',
+            bullet: GITHUB_BASE + 'bullet.png',
+            tileset: GITHUB_BASE + '../tiles/tileset.png'
+        };
+        
+        // Sistema de carga de imágenes
+        const images = {};
+        let imagesLoaded = 0;
+        const totalImages = Object.keys(imageUrls).length;
+        
+        // Cargar imágenes
+        Object.keys(imageUrls).forEach(key => {
+            images[key] = new Image();
+            images[key].src = imageUrls[key];
+            images[key].onload = () => {
+                imagesLoaded++;
+                if (imagesLoaded === totalImages) {
+                    console.log('Todas las imágenes cargadas');
+                    startGame();
+                }
+            };
+            images[key].onerror = () => {
+                console.error(`Error cargando: ${key}`);
+                imagesLoaded++;
+                if (imagesLoaded === totalImages) {
+                    startGame();
+                }
+            };
+        });
+        
+        // Jugador
+        const player = {
+            x: 100,
+            y: GROUND_Y,
+            width: 64,
+            height: 64,
+            velocityY: 0,
+            velocityX: 0,
+            isJumping: false,
+            isShooting: false,
+            direction: 1, // 1 = derecha, -1 = izquierda
+            currentAnimation: 'idle',
+            currentFrame: 0,
+            frameTimer: 0,
+            frameDelay: 8,
+            animations: {
+                idle: { frames: 4, width: 64 },
+                run: { frames: 6, width: 64 },
+                jump: { frames: 4, width: 64 },
+                shoot: { frames: 4, width: 64 }
+            }
+        };
+        
+        // Balas
+        const bullets = [];
+        const bulletSpeed = 10;
+        let shootCooldown = 0;
+        
+        // Controles
+        const keys = {};
+        
+        // Score
+        let score = 0;
+        
+        // Plataformas
+        const platforms = [
+            { x: 0, y: GROUND_Y + 64, width: canvas.width, height: 40 },
+            { x: 300, y: GROUND_Y - 100, width: 200, height: 20 },
+            { x: 550, y: GROUND_Y - 200, width: 150, height: 20 }
+        ];
+        
+        // Event Listeners
+        document.addEventListener('keydown', (e) => {
+            keys[e.key.toLowerCase()] = true;
+            
+            // Disparar
+            if (e.key === ' ' && shootCooldown === 0) {
+                shoot();
+                e.preventDefault();
+            }
+        });
+        
+        document.addEventListener('keyup', (e) => {
+            keys[e.key.toLowerCase()] = true;
+        });
+        
+        function shoot() {
+            bullets.push({
+                x: player.direction === 1 ? player.x + player.width : player.x,
+                y: player.y + player.height / 2,
+                direction: player.direction,
+                width: 16,
+                height: 8
+            });
+            player.isShooting = true;
+            player.currentAnimation = 'shoot';
+            player.currentFrame = 0;
+            shootCooldown = 30;
+        }
+        
+        function updatePlayer() {
+            // Movimiento horizontal
+            if (keys['a'] || keys['arrowleft']) {
+                player.velocityX = -MOVE_SPEED;
+                player.direction = -1;
+                if (!player.isJumping && !player.isShooting) {
+                    player.currentAnimation = 'run';
+                }
+            } else if (keys['d'] || keys['arrowright']) {
+                player.velocityX = MOVE_SPEED;
+                player.direction = 1;
+                if (!player.isJumping && !player.isShooting) {
+                    player.currentAnimation = 'run';
+                }
+            } else {
+                player.velocityX = 0;
+                if (!player.isJumping && !player.isShooting) {
+                    player.currentAnimation = 'idle';
+                }
+            }
+            
+            // Saltar
+            if ((keys['w'] || keys['arrowup'] || keys[' ']) && !player.isJumping) {
+                player.velocityY = JUMP_FORCE;
+                player.isJumping = true;
+                player.currentAnimation = 'jump';
+                player.currentFrame = 0;
+            }
+            
+            // Aplicar gravedad
+            player.velocityY += GRAVITY;
+            player.x += player.velocityX;
+            player.y += player.velocityY;
+            
+            // Colisión con el suelo
+            if (player.y >= GROUND_Y) {
+                player.y = GROUND_Y;
+                player.velocityY = 0;
+                player.isJumping = false;
+            }
+            
+            // Límites del canvas
+            if (player.x < 0) player.x = 0;
+            if (player.x > canvas.width - player.width) player.x = canvas.width - player.width;
+            
+            // Cooldown de disparo
+            if (shootCooldown > 0) shootCooldown--;
+            
+            // Actualizar animación
+            updateAnimation();
+        }
+        
+        function updateAnimation() {
+            player.frameTimer++;
+            if (player.frameTimer >= player.frameDelay) {
+                player.frameTimer = 0;
+                player.currentFrame++;
+                
+                const anim = player.animations[player.currentAnimation];
+                if (player.currentFrame >= anim.frames) {
+                    player.currentFrame = 0;
+                    if (player.currentAnimation === 'shoot') {
+                        player.isShooting = false;
+                    }
+                }
+            }
+        }
+        
+        function updateBullets() {
+            for (let i = bullets.length - 1; i >= 0; i--) {
+                bullets[i].x += bulletSpeed * bullets[i].direction;
+                
+                // Eliminar balas fuera de pantalla
+                if (bullets[i].x < 0 || bullets[i].x > canvas.width) {
+                    bullets.splice(i, 1);
+                    score += 10;
+                    document.getElementById('score').textContent = `Score: ${score}`;
+                }
+            }
+        }
+        
+        function drawPlayer() {
+            const anim = player.animations[player.currentAnimation];
+            const img = images[player.currentAnimation];
+            
+            if (img && img.complete) {
+                ctx.save();
+                
+                // Flip horizontal si mira a la izquierda
+                if (player.direction === -1) {
+                    ctx.scale(-1, 1);
+                    ctx.drawImage(
+                        img,
+                        player.currentFrame * anim.width, 0,
+                        anim.width, player.height,
+                        -player.x - player.width, player.y,
+                        player.width, player.height
+                    );
+                } else {
+                    ctx.drawImage(
+                        img,
+                        player.currentFrame * anim.width, 0,
+                        anim.width, player.height,
+                        player.x, player.y,
+                        player.width, player.height
+                    );
+                }
+                
+                ctx.restore();
+            } else {
+                // Placeholder si no hay imagen
+                ctx.fillStyle = '#ff0000';
+                ctx.fillRect(player.x, player.y, player.width, player.height);
+            }
+        }
+        
+        function drawBullets() {
+            ctx.fillStyle = '#ffff00';
+            bullets.forEach(bullet => {
+                if (images.bullet && images.bullet.complete) {
+                    ctx.drawImage(images.bullet, bullet.x, bullet.y, bullet.width, bullet.height);
+                } else {
+                    ctx.fillRect(bullet.x, bullet.y, bullet.width, bullet.height);
+                }
+            });
+        }
+        
+        function drawPlatforms() {
+            ctx.fillStyle = '#8B4513';
+            platforms.forEach(platform => {
+                ctx.fillRect(platform.x, platform.y, platform.width, platform.height);
+            });
+        }
+        
+        function gameLoop() {
+            // Limpiar canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Actualizar
+            updatePlayer();
+            updateBullets();
+            
+            // Dibujar
+            drawPlatforms();
+            drawPlayer();
+            drawBullets();
+            
+            requestAnimationFrame(gameLoop);
+        }
+        
+        function startGame() {
+            gameLoop();
+        }
+        
+        // Mensaje inicial
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '20px Courier New';
+        ctx.textAlign = 'center';
+        ctx.fillText('Cargando sprites...', canvas.width / 2, canvas.height / 2);
+        ctx.fillText('Actualiza las rutas de GitHub en el código', canvas.width / 2, canvas.height / 2 + 30);
+    </script>
+</body>
+</html>
